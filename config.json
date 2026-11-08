@@ -1,0 +1,7 @@
+{
+  "onepiece": ["Yamato", "Boa Hancock", "Nico Robin", "Shirahoshi"],
+  "pokemon": [
+    {"name": "Greninja", "match": "contains", "category": "Pokemon"},
+    {"name": "Cynthia", "match": "startswith", "category": "any"}
+  ]
+}
