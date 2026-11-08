@@ -116,5 +116,5 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.datas
 ['q','typ','rar','fin','sort'].forEach(i=>$(i).oninput=render);
 $('exp').onclick=()=>{const t=JSON.stringify(Object.keys(owned));navigator.clipboard?.writeText(t).then(()=>alert('Collection copied to clipboard.'),()=>prompt('Copy:',t))||prompt('Copy:',t)};
 $('imp').onclick=()=>{const t=prompt('Paste exported collection:');if(!t)return;try{JSON.parse(t).forEach(k=>owned[k]=1);save();render()}catch(e){alert('Invalid data')}};
-fetch('data/cards.json').then(r=>r.json()).then(d=>{DATA=d;$('upd').textContent='prices '+d.updated;acct();render();if(user)pull()}).catch(()=>$('grid').innerHTML='<div class="empty">Could not load data/cards.json</div>');
+fetch('data/cards.json',{cache:'no-cache'}).then(r=>r.json()).then(d=>{DATA=d;$('upd').textContent='prices '+d.updated;acct();render();if(user)pull()}).catch(()=>$('grid').innerHTML='<div class="empty">Could not load data/cards.json</div>');
 </script></body></html>
