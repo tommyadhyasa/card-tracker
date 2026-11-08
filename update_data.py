@@ -19,21 +19,21 @@ def get(url, tries=3):
                 return None
             time.sleep(2)
 
-def onepiece(names):
+def onepiece(names, aliases):
     rows = []
     for ep in ("allSetCards", "allSTCards", "allPromoCards"):
         rows += get(f"https://optcgapi.com/api/{ep}/") or []
     cards = {}
     for c in rows:
         base = c["card_name"].split(" (")[0].strip()
-        if base not in names:
+        if base not in names and base not in aliases:
             continue
         label = " ".join(re.findall(r"\(([^)]*)\)", c["card_name"]))
         label = " ".join(p for p in label.split() if not re.fullmatch(r"\d+|[A-Z]{2,4}\d*-\d+", p))
         rare = c["rarity"]
         foil = "Non-foil" if rare in ("C", "UC") and "_" not in c["card_image_id"] else "Foil"
         cards[c["card_image_id"]] = {
-            "id": c["card_image_id"], "game": "onepiece", "character": base,
+            "id": c["card_image_id"], "game": "onepiece", "character": aliases.get(base, base),
             "name": c["card_name"], "number": c["card_set_id"], "set": c["set_name"],
             "rarity": rare, "finish": foil, "variant": label or "Standard",
             "image": c["card_image"], "price": c["market_price"], "currency": "USD",
@@ -79,7 +79,7 @@ def main():
     old = {}
     if os.path.exists(OUT):
         old = {c["id"]: c.get("price") for c in json.load(open(OUT))["cards"]}
-    cards = onepiece(set(cfg["onepiece"])) + pokemon(cfg["pokemon"])
+    cards = onepiece(set(cfg["onepiece"]), cfg.get("onepiece_aliases", {})) + pokemon(cfg["pokemon"])
     for c in cards:
         c["prev_price"] = old.get(c["id"])
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
