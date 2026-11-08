@@ -108,7 +108,7 @@ function render(){
  $('grid').innerHTML=list.length?'':'<div class="empty">No cards match.</div>';
  for(const c of list){
   const d=chg(c),el=document.createElement('div');el.className='card'+(owned[c.id]?' own':'');
-  el.innerHTML=`<img loading="lazy" referrerpolicy="no-referrer" src="${c.image}" alt=""><div class="tick">${owned[c.id]?'✓':'+'}</div><div class="info"><div class="n">${c.character}${c.variant!=='Standard'?' · '+c.variant:''}</div><div class="m">${c.number} · ${c.set}</div><div class="m"><span class="tag">${c.lang}</span>${c.promo?'<span class="tag">Promo</span>':''}<span class="tag">${c.rarity}</span><span class="tag">${c.finish}</span></div><div class="price">${money(c.price,c.currency)} ${d?`<small class="${d>0?'up':'dn'}">${d>0?'▲':'▼'}${Math.abs(d).toFixed(2)}</small>`:''}</div></div>`;
+  el.innerHTML=`<img loading="lazy" referrerpolicy="no-referrer" src="${c.image}" alt=""><div class="tick">${owned[c.id]?'✓':'+'}</div><div class="info"><div class="n">${c.character}${c.variant!=='Standard'?' · '+c.variant:''}</div><div class="m">${c.number} · ${c.set}</div><div class="m"><span class="tag">${c.lang}</span>${c.promo?'<span class="tag">Promo</span>':''}${c.imageApprox?'<span class="tag" title="Picture found via Google; may not be the exact version">~img</span>':''}<span class="tag">${c.rarity}</span><span class="tag">${c.finish}</span></div><div class="price">${money(c.price,c.currency)} ${d?`<small class="${d>0?'up':'dn'}">${d>0?'▲':'▼'}${Math.abs(d).toFixed(2)}</small>`:''}</div></div>`;
   el.onclick=()=>{const on=!owned[c.id];on?owned[c.id]=1:delete owned[c.id];persist(c.id,on);render()};
   $('grid').append(el)}
 }
