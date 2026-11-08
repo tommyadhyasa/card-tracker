@@ -146,6 +146,7 @@ def main():
     for c in cards:
         if (not c["image"] or "noimage" in c["image"]) and c["id"] in ov:
             c["image"], c["imageApprox"] = ov[c["id"]], True
+        c["finish"] = cfg.get("finish_overrides", {}).get(c["id"], c["finish"])
         c["prev_price"] = old.get(c["id"])
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump({"updated": date.today().isoformat(), "characters": {

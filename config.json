@@ -1,14 +1,42 @@
 {
-  "onepiece": ["Yamato", "Boa Hancock", "Nico Robin", "Shirahoshi"],
-  "onepiece_aliases": {"My name is Shirahoshi!!": "Shirahoshi"},
+  "onepiece": [
+    "Yamato",
+    "Boa Hancock",
+    "Nico Robin",
+    "Shirahoshi"
+  ],
+  "onepiece_aliases": {
+    "My name is Shirahoshi!!": "Shirahoshi"
+  },
   "onepiece_jp": {
-    "Yamato": ["ヤマト"],
-    "Boa Hancock": ["ボア・ハンコック"],
-    "Nico Robin": ["ニコ・ロビン"],
-    "Shirahoshi": ["しらほし"]
+    "Yamato": [
+      "ヤマト"
+    ],
+    "Boa Hancock": [
+      "ボア・ハンコック"
+    ],
+    "Nico Robin": [
+      "ニコ・ロビン"
+    ],
+    "Shirahoshi": [
+      "しらほし"
+    ]
   },
   "pokemon": [
-    {"name": "Greninja", "ja": "ゲッコウガ", "match": "contains", "category": "Pokemon"},
-    {"name": "Cynthia", "ja": "シロナ", "match": "startswith", "category": "any"}
-  ]
+    {
+      "name": "Greninja",
+      "ja": "ゲッコウガ",
+      "match": "contains",
+      "category": "Pokemon"
+    },
+    {
+      "name": "Cynthia",
+      "ja": "シロナ",
+      "match": "startswith",
+      "category": "any"
+    }
+  ],
+  "finish_overrides": {
+    "promo:P-115_pr1": "Non-foil"
+  }
 }
