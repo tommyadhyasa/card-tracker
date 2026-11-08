@@ -91,7 +91,7 @@ def onepiece_jp(jp):
                         "character": character, "name": name, "number": num[1].strip(),
                         "set": SETNAMES.get(m[1].split("/")[0].upper(), m[1].split("/")[0].upper()), "rarity": rar,
                         "finish": "Non-foil" if rar in ("C", "UC") and "パラレル" not in name else "Foil",
-                        "variant": variant, "image": img[1] if img else "",
+                        "variant": variant, "image": img[1].replace("100_140", "200_280") if img else "",
                         "price": int(p[1].replace(",", "")) if p else None, "currency": "JPY",
                     }
     return list(cards.values())
