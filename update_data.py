@@ -27,10 +27,23 @@ def get(url):
     except ValueError:
         return None
 
+SETNAMES = {}  # "OP01" -> "Romance Dawn", filled from the English data
+JP_TERMS = [("スーパーパラレル", "Super Parallel"), ("パラレル", "Parallel"), ("刻印なし", "No stamp"),
+            ("刻印あり", "Stamped"), ("漫画", "Manga"), ("リプリント", "Reprint")]
+
+def en_variant(name):
+    parts = []
+    for raw in re.findall(r"[(（]([^)）]*)[)）]", name):
+        for jp, en in JP_TERMS:
+            raw = raw.replace(jp, en)
+        parts.append(raw.strip())
+    return " ".join(p for p in parts if p) or "Standard"
+
 def onepiece_en(names, aliases):
     cards = {}
     for ep, promo in (("allSetCards", False), ("allSTCards", False), ("allPromos", True)):
         for c in get(f"https://optcgapi.com/api/{ep}/") or []:
+            SETNAMES.setdefault(c["set_id"].replace("-", "").split("EB")[0] if False else c["set_id"].replace("-", ""), c["set_name"])
             base = c["card_name"].split(" (")[0].strip()
             if base not in names and base not in aliases:
                 continue
@@ -71,12 +84,12 @@ def onepiece_jp(jp):
                     name = html.unescape(n[1]).strip()
                     if not name.startswith(w):
                         continue
-                    variant = " ".join(re.findall(r"[(（]([^)）]*)[)）]", name)) or "Standard"
+                    variant = en_variant(name)
                     cards["jp:" + m[1]] = {
                         "id": "jp:" + m[1], "game": "onepiece", "lang": "JP",
                         "promo": rar in ("P", "-") or num[1].startswith("P-"),
                         "character": character, "name": name, "number": num[1].strip(),
-                        "set": m[1].split("/")[0].upper(), "rarity": rar,
+                        "set": SETNAMES.get(m[1].split("/")[0].upper(), m[1].split("/")[0].upper()), "rarity": rar,
                         "finish": "Non-foil" if rar in ("C", "UC") and "パラレル" not in name else "Foil",
                         "variant": variant, "image": img[1] if img else "",
                         "price": int(p[1].replace(",", "")) if p else None, "currency": "JPY",
