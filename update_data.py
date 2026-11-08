@@ -96,6 +96,35 @@ def onepiece_jp(jp):
                     }
     return list(cards.values())
 
+def cardrush_jp(jp, have):
+    """Japanese promo cards that Yuyu-tei doesn't list, from cardrush-op.jp (prices incl. tax)."""
+    cards = {}
+    for character, words in jp.items():
+        for w in words:
+            for page in range(1, 8):
+                h = fetch("https://www.cardrush-op.jp/product-list?keyword=" + urllib.parse.quote(w) + f"&page={page}")
+                blocks = re.split(r'(?=<li class="list_item_cell)', h or "")[1:]
+                if not blocks:
+                    break
+                for b in blocks:
+                    text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", b))).strip()
+                    m = re.match(r"(?:〔状態A-?〕)?\s*(.+?)【([^】]+)】\{([^}]+)\}.*?([\d,]+)円.*?在庫数", text)
+                    link = re.search(r'href="https://www\.cardrush-op\.jp/product/(\d+)"', b)
+                    img = re.search(r'src="(https://www\.cardrush-op\.jp/data/[^"]+)"', b)
+                    if not (m and link) or text.startswith("〔") and not text.startswith("〔状態A-〕"):
+                        continue
+                    name, rar, num = m[1].strip(), m[2], m[3]
+                    if not name.startswith(w) or not num.startswith("P-") or any(num == c["number"] for c in have):
+                        continue
+                    variant = " ".join(re.findall(r"[(（]([^)）]*)[)）]", name)) or "Standard"
+                    cid = f"jp:cr{num}:{variant}"
+                    cards.setdefault(cid, {
+                        "id": cid, "game": "onepiece", "lang": "JP", "promo": True, "character": character,
+                        "name": name, "number": num, "set": "Promo", "rarity": rar, "finish": "Foil",
+                        "variant": en_variant(name), "image": img[1] if img else "",
+                        "price": int(m[4].replace(",", "")), "currency": "JPY"})
+    return list(cards.values())
+
 def pokemon(rules):
     cards = {}
     def detail(arg):
@@ -140,8 +169,9 @@ def main():
     old = {}
     if os.path.exists(OUT):
         old = {c["id"]: c.get("price") for c in json.load(open(OUT))["cards"]}
-    cards = (onepiece_en(set(cfg["onepiece"]), cfg.get("onepiece_aliases", {}))
-             + onepiece_jp(cfg.get("onepiece_jp", {})) + pokemon(cfg["pokemon"]))
+    jp = onepiece_jp(cfg.get("onepiece_jp", {}))
+    cards = (onepiece_en(set(cfg["onepiece"]), cfg.get("onepiece_aliases", {})) + jp
+             + cardrush_jp(cfg.get("onepiece_jp", {}), jp) + pokemon(cfg["pokemon"]))
     ov = json.load(open(os.path.join(ROOT, "image_overrides.json"))) if os.path.exists(os.path.join(ROOT, "image_overrides.json")) else {}
     for c in cards:
         if (not c["image"] or "noimage" in c["image"]) and c["id"] in ov:
