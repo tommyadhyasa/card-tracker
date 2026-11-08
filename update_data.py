@@ -1,77 +1,125 @@
 #!/usr/bin/env python3
 """Fetch card lists + prices for the characters in config.json -> docs/data/cards.json.
+Sources: optcgapi.com (One Piece EN + promos), yuyu-tei.jp (One Piece JP, JPY), tcgdex.net (Pokemon EN + JP).
 Run weekly (see .github/workflows/weekly.yml) or by hand: python3 update_data.py"""
-import json, os, re, time, urllib.request, urllib.parse
+import html, json, os, re, time, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "docs", "data", "cards.json")
+UA = {"User-Agent": "Mozilla/5.0 card-tracker/1.0"}
 
-def get(url, tries=3):
+def fetch(url, tries=3):
     for i in range(tries):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "card-tracker/1.0"})
-            with urllib.request.urlopen(req, timeout=60) as r:
-                return json.load(r)
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                return r.read().decode()
         except Exception:
             if i == tries - 1:
                 return None
             time.sleep(2)
 
-def onepiece(names, aliases):
-    rows = []
-    for ep in ("allSetCards", "allSTCards", "allPromoCards"):
-        rows += get(f"https://optcgapi.com/api/{ep}/") or []
+def get(url):
+    t = fetch(url)
+    try:
+        return json.loads(t) if t else None
+    except ValueError:
+        return None
+
+def onepiece_en(names, aliases):
     cards = {}
-    for c in rows:
-        base = c["card_name"].split(" (")[0].strip()
-        if base not in names and base not in aliases:
-            continue
-        label = " ".join(re.findall(r"\(([^)]*)\)", c["card_name"]))
-        label = " ".join(p for p in label.split() if not re.fullmatch(r"\d+|[A-Z]{2,4}\d*-\d+", p))
-        rare = c["rarity"]
-        foil = "Non-foil" if rare in ("C", "UC") and "_" not in c["card_image_id"] else "Foil"
-        cards[c["card_image_id"]] = {
-            "id": c["card_image_id"], "game": "onepiece", "character": aliases.get(base, base),
-            "name": c["card_name"], "number": c["card_set_id"], "set": c["set_name"],
-            "rarity": rare, "finish": foil, "variant": label or "Standard",
-            "image": c["card_image"], "price": c["market_price"], "currency": "USD",
-        }
+    for ep, promo in (("allSetCards", False), ("allSTCards", False), ("allPromos", True)):
+        for c in get(f"https://optcgapi.com/api/{ep}/") or []:
+            base = c["card_name"].split(" (")[0].strip()
+            if base not in names and base not in aliases:
+                continue
+            label = " ".join(re.findall(r"\(([^)]*)\)", c["card_name"]))
+            label = " ".join(p for p in label.split() if not re.fullmatch(r"\d+|[A-Z]{2,4}\d*-\d+", p))
+            rare = c["rarity"]
+            foil = "Non-foil" if rare in ("C", "UC") and "_" not in c["card_image_id"] else "Foil"
+            cid = ("promo:" if promo else "") + c["card_image_id"]
+            n = 1
+            while cid in cards:
+                n += 1
+                cid = f'{"promo:" if promo else ""}{c["card_image_id"]}#{n}'
+            cards[cid] = {
+                "id": cid, "game": "onepiece", "lang": "EN", "promo": promo or c["card_set_id"].startswith("P-"),
+                "character": aliases.get(base, base), "name": c["card_name"], "number": c["card_set_id"],
+                "set": c["set_name"], "rarity": rare, "finish": foil, "variant": label or "Standard",
+                "image": c["card_image"], "price": c["market_price"], "currency": "USD",
+            }
+    return list(cards.values())
+
+def onepiece_jp(jp):
+    cards = {}
+    for character, words in jp.items():
+        for w in words:
+            h = fetch("https://yuyu-tei.jp/sell/opc/s/search?search_word=" + urllib.parse.quote(w))
+            if not h:
+                continue
+            for sec in re.split(r'(?=<span\s+class="py-2 d-inline-block px-2 me-2 text-white fw-bold">)', h)[1:]:
+                rar = re.match(r'[^>]*>([^<]*)</span>', sec)[1].strip().replace("P-", "")
+                for b in sec.split('class="card-product')[1:]:
+                    m = re.search(r'/sell/opc/card/([^"]+)"', b)
+                    n = re.search(r'<h4[^>]*>([^<]*)</h4>', b)
+                    num = re.search(r'text-center my-2">([^<]*)<', b)
+                    p = re.search(r'([\d,]+)\s*円', b)
+                    img = re.search(r'src="(https://card\.yuyu-tei\.jp[^"]+)"', b)
+                    if not (m and n and num):
+                        continue
+                    name = html.unescape(n[1]).strip()
+                    if not name.startswith(w):
+                        continue
+                    variant = " ".join(re.findall(r"[(（]([^)）]*)[)）]", name)) or "Standard"
+                    cards["jp:" + m[1]] = {
+                        "id": "jp:" + m[1], "game": "onepiece", "lang": "JP",
+                        "promo": rar in ("P", "-") or num[1].startswith("P-"),
+                        "character": character, "name": name, "number": num[1].strip(),
+                        "set": m[1].split("/")[0].upper(), "rarity": rar,
+                        "finish": "Non-foil" if rar in ("C", "UC") and "パラレル" not in name else "Foil",
+                        "variant": variant, "image": img[1] if img else "",
+                        "price": int(p[1].replace(",", "")) if p else None, "currency": "JPY",
+                    }
     return list(cards.values())
 
 def pokemon(rules):
     cards = {}
-    def detail(cid):
-        return get(f"https://api.tcgdex.net/v2/en/cards/{urllib.parse.quote(cid)}")
+    def detail(arg):
+        lang, cid = arg
+        return lang, get(f"https://api.tcgdex.net/v2/{lang}/cards/{urllib.parse.quote(cid)}")
     for rule in rules:
-        res = get("https://api.tcgdex.net/v2/en/cards?name=" + urllib.parse.quote(rule["name"])) or []
-        ids = [c["id"] for c in res
-               if (rule["match"] == "contains" and rule["name"].lower() in c["name"].lower())
-               or c["name"].lower().startswith(rule["name"].lower())]
-        with ThreadPoolExecutor(8) as ex:
-            details = list(ex.map(detail, ids))
-        for d in details:
-            if not d or (rule["category"] != "any" and d.get("category") != rule["category"]):
-                continue
-            v, tp, cm = d.get("variants") or {}, (d.get("pricing") or {}).get("tcgplayer") or {}, (d.get("pricing") or {}).get("cardmarket") or {}
-            finishes = [(k, f) for k, f in (("normal", "Non-foil"), ("reverse", "Reverse holo"), ("holo", "Holo")) if v.get(k)]
-            if not finishes:
-                finishes = [("normal", "Non-foil")]
-            for key, label in finishes:
-                tpk = {"normal": "normal", "reverse": "reverse-holofoil", "holo": "holofoil"}[key]
-                price, cur = (tp.get(tpk) or {}).get("marketPrice"), "USD"
-                if price is None and tp.get("holofoil") and key == "holo":
-                    price = tp["holofoil"].get("marketPrice")
-                if price is None and cm:
-                    price, cur = cm.get("trend-holo" if key != "normal" else "trend"), "EUR"
-                cards[d["id"] + ":" + key] = {
-                    "id": d["id"] + ":" + key, "game": "pokemon", "character": rule["name"],
-                    "name": d["name"], "number": f'{d["localId"]}/{d["set"]["cardCount"]["official"]}',
-                    "set": d["set"]["name"], "rarity": d.get("rarity") or "-", "finish": label,
-                    "variant": "Standard", "image": (d["image"] + "/low.webp") if d.get("image") else "",
-                    "price": price, "currency": cur,
-                }
+        for lang in ("en", "ja"):
+            term = rule["name"] if lang == "en" else rule["ja"]
+            res = get(f"https://api.tcgdex.net/v2/{lang}/cards?name=" + urllib.parse.quote(term)) or []
+            ids = [(lang, c["id"]) for c in res
+                   if (rule["match"] == "contains" and term.lower() in c["name"].lower())
+                   or c["name"].lower().startswith(term.lower())]
+            with ThreadPoolExecutor(8) as ex:
+                details = list(ex.map(detail, ids))
+            for _, d in details:
+                if not d or (rule["category"] != "any" and d.get("category") != rule["category"]):
+                    continue
+                v = d.get("variants") or {}
+                tp = (d.get("pricing") or {}).get("tcgplayer") or {}
+                cm = (d.get("pricing") or {}).get("cardmarket") or {}
+                finishes = [(k, f) for k, f in (("normal", "Non-foil"), ("reverse", "Reverse holo"), ("holo", "Holo")) if v.get(k)] or [("normal", "Non-foil")]
+                for key, label in finishes:
+                    tpk = {"normal": "normal", "reverse": "reverse-holofoil", "holo": "holofoil"}[key]
+                    price, cur = (tp.get(tpk) or {}).get("marketPrice"), "USD"
+                    if price is None and tp.get("holofoil") and key == "holo":
+                        price = tp["holofoil"].get("marketPrice")
+                    if price is None and cm:
+                        price, cur = cm.get("trend-holo" if key != "normal" else "trend"), "EUR"
+                    cid = ("" if lang == "en" else "ja:") + d["id"] + ":" + key
+                    cards[cid] = {
+                        "id": cid, "game": "pokemon", "lang": "EN" if lang == "en" else "JP",
+                        "promo": bool(re.search("promo|プロモ", d["set"]["name"].lower())), "character": rule["name"],
+                        "name": d["name"], "number": f'{d["localId"]}/{d["set"]["cardCount"]["official"]}',
+                        "set": d["set"]["name"], "rarity": d.get("rarity") or "-", "finish": label,
+                        "variant": "Standard", "image": (d["image"] + "/low.webp") if d.get("image") else "",
+                        "price": price, "currency": cur,
+                    }
     return list(cards.values())
 
 def main():
@@ -79,13 +127,14 @@ def main():
     old = {}
     if os.path.exists(OUT):
         old = {c["id"]: c.get("price") for c in json.load(open(OUT))["cards"]}
-    cards = onepiece(set(cfg["onepiece"]), cfg.get("onepiece_aliases", {})) + pokemon(cfg["pokemon"])
+    cards = (onepiece_en(set(cfg["onepiece"]), cfg.get("onepiece_aliases", {}))
+             + onepiece_jp(cfg.get("onepiece_jp", {})) + pokemon(cfg["pokemon"]))
     for c in cards:
         c["prev_price"] = old.get(c["id"])
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump({"updated": date.today().isoformat(), "characters": {
         "onepiece": cfg["onepiece"], "pokemon": [r["name"] for r in cfg["pokemon"]]}, "cards": cards},
-        open(OUT, "w"), separators=(",", ":"))
+        open(OUT, "w"), ensure_ascii=False, separators=(",", ":"))
     print(f"{len(cards)} cards written")
 
 if __name__ == "__main__":
