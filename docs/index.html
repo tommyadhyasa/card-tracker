@@ -78,7 +78,7 @@ if(sb)sb.auth.onAuthStateChange((ev,s)=>{user=s?s.user:null;acct();if(user&&DATA
 function persist(id,on){save();if(sb&&user)(on?sb.from('owned_cards').upsert({card_id:id}):sb.from('owned_cards').delete().eq('card_id',id)).then(r=>r.error&&alert('Sync failed: '+r.error.message))}
 const S={game:'all',char:'all',lang:'all',view:'all'};let DATA=null;
 const $=id=>document.getElementById(id);
-const RATE={USD:1,EUR:1.08,JPY:0.0066}; // approximate, only used for totals
+const RATE={USD:1,EUR:1.08,JPY:0.0066,IDR:0.000063}; // approximate, only used for totals
 const usd=c=>(c.price||0)*(RATE[c.currency]||1);
 const money=(p,c)=>p==null?'—':c==='JPY'?'¥'+Math.round(p).toLocaleString():(c==='EUR'?'€':'$')+p.toFixed(2);
 const GN={onepiece:'One Piece',pokemon:'Pokémon'};
@@ -86,7 +86,7 @@ function chips(el,items,key){el.innerHTML='';items.forEach(([v,l])=>{const b=doc
 function opts(el,label,vals){const cur=el.value;el.innerHTML=`<option value="">${label}</option>`+vals.map(v=>`<option>${v}</option>`).join('');el.value=vals.includes(cur)?cur:''}
 function render(){
  const all=DATA.cards;
- chips($('langs'),[['all','EN + JP'],['EN','English'],['JP','Japanese']],'lang');
+ chips($('langs'),[['all','All languages'],['EN','English'],['JP','Japanese'],['ID','Indonesian']],'lang');
  chips($('games'),[['all','All games'],...Object.entries(GN)],'game');
  const chs=[...new Set(all.filter(c=>S.game==='all'||c.game===S.game).map(c=>c.character))];
  chips($('chars'),[['all','All characters'],...chs.map(c=>[c,c])],'char');

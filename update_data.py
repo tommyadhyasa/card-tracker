@@ -95,14 +95,23 @@ def official(host):
             cards.setdefault(c["id"], c)
     return cards
 
+HOSTED = [  # (official image url, where the small copy goes under docs/)
+    (r"https://(en|www)\.onepiece-cardgame\.com/images/cardlist/card/(.+)\.png$", lambda m: f'img/o/{"en" if m[1] == "en" else "jp"}/{m[2]}.webp'),
+    (r"https://www\.pokemon-card\.com/assets/images/card_images/(?:large|legend)/\w+/(\w+)\.jpg$", lambda m: f"img/p/jp/{m[1]}.webp"),
+    (r"https://asia\.pokemon-card\.com/id/card-img/(id\d+)\.png$", lambda m: f"img/p/id/{m[1]}.webp"),
+]
+
 def self_host(cards):
-    """The official site refuses to be embedded by other sites, so keep small WebP copies of its images in docs/img/o/."""
+    """The official sites refuse hotlinking or serve huge files, so keep small WebP copies of their images in docs/img/."""
     from PIL import Image
     def one(c):
-        m = re.match(r"https://(en|www)\.onepiece-cardgame\.com/images/cardlist/card/(.+)\.png$", c["image"] or "")
-        if not m:
+        for pat, where in HOSTED:
+            m = re.match(pat, c["image"] or "")
+            if m:
+                break
+        else:
             return
-        rel = f'img/o/{"en" if m[1] == "en" else "jp"}/{m[2]}.webp'
+        rel = where(m)
         path = os.path.join(ROOT, "docs", rel)
         if not os.path.exists(path):
             try:
@@ -269,6 +278,70 @@ def pokemon(rules):
                     }
     return list(cards.values())
 
+def pokemon_official(rules):
+    """Pokemon cards from the official Japanese and Indonesian (Asia) card databases: (JP list, ID list)."""
+    def name_ok(rule, name, term):
+        n = html.unescape(name).lower()
+        return term.lower() in n if rule["match"] == "contains" or term.isascii() else n.startswith(term.lower())
+
+    jp, ids = {}, {}
+    for rule in rules:
+        base = "https://www.pokemon-card.com/card-search/resultAPI.php?sm_and_keyword=true&regulation_sidebar_form=all&keyword=" + urllib.parse.quote(rule["ja"])
+        first = get(base + "&page=1") or {}
+        for page in range(1, int(first.get("maxPage") or 0) + 1):
+            for c in (first if page == 1 else get(base + f"&page={page}") or {}).get("cardList", []):
+                if name_ok(rule, c["cardNameViewText"], rule["ja"]):
+                    jp[c["cardID"]] = {"name": html.unescape(c["cardNameViewText"]), "thumb": c["cardThumbFile"], "character": rule["name"]}
+        base = "https://asia.pokemon-card.com/id/card-search/list/?keyword=" + urllib.parse.quote(rule["name"])
+        for page in range(1, 20):
+            h = fetch(base + f"&pageNo={page}") or ""
+            found = re.findall(r'href="/id/card-search/detail/(\d+)/"', h)
+            if not found:
+                break
+            for i in found:
+                ids[i] = {"character": rule["name"], "rule": rule}
+
+    def jp_detail(i):
+        h = fetch(f"https://www.pokemon-card.com/card-search/details.php/card/{i}/") or ""
+        m = re.search(r"&nbsp;\s*([\w-]+)&nbsp;/&nbsp;\s*([\w-]+)&nbsp;", h)
+        return i, (f"{m[1]}/{m[2]}" if m else "-")
+    def id_detail(i):
+        h = fetch(f"https://asia.pokemon-card.com/id/card-search/detail/{i}/") or ""
+        nm = re.search(r'<h1 class="pageHeader cardDetail">(?:\s*<span[^>]*>[^<]*</span>)?\s*([^<]*?)\s*</h1>', h)
+        num = re.search(r'collectorNumber">\s*([^<]*?)\s*<', h)
+        st = re.search(r"Ada di produk</h3>\s*<a[^>]*>\s*([^<]*?)\s*</a>", h)
+        return i, (html.unescape(nm[1]) if nm else "", num[1] if num else "-", html.unescape(st[1]) if st else "-")
+    with ThreadPoolExecutor(8) as ex:
+        numbers = dict(ex.map(jp_detail, jp))
+        details = dict(ex.map(id_detail, ids))
+    jp_cards = []
+    for i, c in jp.items():
+        code = re.search(r"/(?:large|legend)/(\w+)/", c["thumb"])
+        jp_cards.append({"id": "ja:off" + i, "game": "pokemon", "lang": "JP", "promo": False, "character": c["character"],
+                         "name": c["name"], "number": numbers[i], "set": code[1] if code else "-", "rarity": "-", "finish": "Unknown",
+                         "variant": "Standard", "image": "https://www.pokemon-card.com" + c["thumb"], "price": None, "currency": "JPY"})
+    id_cards = []
+    for i, c in ids.items():
+        name, num, st = details[i]
+        if name and name_ok(c["rule"], name, c["rule"]["name"]):
+            id_cards.append({"id": "id:" + i, "game": "pokemon", "lang": "ID", "promo": "promo" in st.lower(), "character": c["character"],
+                             "name": name, "number": num, "set": st, "rarity": "-", "finish": "Unknown", "variant": "Standard",
+                             "image": f"https://asia.pokemon-card.com/id/card-img/id{int(i):08d}.png", "price": None, "currency": "IDR"})
+    return jp_cards, id_cards
+
+def add_official_pokemon(cards, off_jp):
+    """Add the Japanese cards TCGdex lacks (matched on name + number, ignoring zero padding)."""
+    def key(name, number):
+        a, _, b = number.partition("/")
+        return nfkc(name), a.lstrip("0"), b.lstrip("0")
+    theirs = {key(c["name"], c["number"]): c for c in off_jp}
+    for c in cards:  # TCGdex is missing some pictures; the official one fills them in
+        o = theirs.get(key(c["name"], c["number"])) if c["lang"] == "JP" else None
+        if o and not c["image"]:
+            c["image"] = o["image"]
+    have = {key(c["name"], c["number"]) for c in cards if c["lang"] == "JP"}
+    return cards + [c for c in off_jp if key(c["name"], c["number"]) not in have]
+
 def main():
     cfg = json.load(open(os.path.join(ROOT, "config.json")))
     prev = json.load(open(OUT))["cards"] if os.path.exists(OUT) else []
@@ -281,7 +354,10 @@ def main():
     jp = onepiece_jp_official(off_jp, jpn)
     attach_jp_prices(jp, onepiece_jp(jpn))
     groups[("onepiece", "JP")] = jp + cardrush_jp(jpn, jp)
-    for c in pokemon(cfg["pokemon"]):
+    off_pjp, off_pid = pokemon_official(cfg["pokemon"])
+    pk = pokemon(cfg["pokemon"])
+    pk = add_official_pokemon(pk, off_pjp) + off_pid
+    for c in pk:
         groups.setdefault((c["game"], c["lang"]), []).append(c)
     cards = []
     for key, new in groups.items():
