@@ -3,7 +3,10 @@
     "Yamato",
     "Boa Hancock",
     "Nico Robin",
-    "Shirahoshi"
+    "Shirahoshi",
+    "Ulti",
+    "Vinsmoke Reiju",
+    "Nami"
   ],
   "onepiece_aliases": {
     "My name is Shirahoshi!!": "Shirahoshi"
@@ -19,7 +22,17 @@
       "ニコ・ロビン"
     ],
     "Shirahoshi": [
-      "しらほし"
+      "しらほし",
+      "しらほしと申します!!"
+    ],
+    "Ulti": [
+      "うるティ"
+    ],
+    "Vinsmoke Reiju": [
+      "ヴィンスモーク・レイジュ"
+    ],
+    "Nami": [
+      "ナミ"
     ]
   },
   "pokemon": [

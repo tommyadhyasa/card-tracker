@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Fetch card lists + prices for the characters in config.json -> docs/data/cards.json.
-Sources: optcgapi.com (One Piece EN + promos), yuyu-tei.jp (One Piece JP, JPY), tcgdex.net (Pokemon EN + JP).
+Sources: onepiece-cardgame.com official card list (One Piece EN + JP catalog), optcgapi.com (One Piece EN prices + event promos),
+yuyu-tei.jp / cardrush-op.jp (One Piece JP prices, JPY), tcgdex.net (Pokemon EN + JP).
 Run weekly (see .github/workflows/weekly.yml) or by hand: python3 update_data.py"""
-import html, json, os, re, time, urllib.parse, urllib.request
+import html, io, json, os, re, sys, time, unicodedata, urllib.parse, urllib.request
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -63,6 +65,109 @@ def onepiece_en(names, aliases):
                 "image": c["card_image"], "price": c["market_price"], "currency": "USD",
             }
     return list(cards.values())
+
+def nfkc(t):
+    return unicodedata.normalize("NFKC", t).strip()
+
+def official(host):
+    """Every card on Bandai's official card list, one request per series: {id: card}."""
+    base = f"https://{host}/cardlist/"
+    series = re.findall(r'<option value="(\d{5,})"[^>]*>([^<]*)', fetch(base) or "")
+    def one(s):
+        label = html.unescape(re.sub(r"<[^>]+>", " ", html.unescape(s[1])))
+        pack = re.search(r"[\[【]([A-Za-z0-9\-]+)[\]】]", label)
+        out = []
+        for b in (fetch(f"{base}?series={s[0]}") or "").split('<dl class="modalCol"')[1:]:
+            i = re.search(r'id="([^"]+)"', b)
+            info = re.search(r'infoCol">\s*<span>([^<]*)</span>\s*\|\s*<span>([^<]*)</span>', b)
+            nm = re.search(r'cardName">([^<]*)<', b)
+            if i and info and nm:
+                rar = "SP" if info[2].startswith("SP") else info[2].strip()
+                out.append({"id": i[1], "number": info[1].strip(), "rarity": rar, "name": html.unescape(nm[1]).strip(),
+                            "promo": s[0].endswith(("901", "801")), "pack": pack[1] if pack else None,
+                            "image": f"https://{host}/images/cardlist/card/{i[1]}.png"})
+        return out
+    with ThreadPoolExecutor(6) as ex:
+        res = list(ex.map(one, series))
+    cards = {}
+    for out in res:
+        for c in out:
+            cards.setdefault(c["id"], c)
+    return cards
+
+def self_host(cards):
+    """The official site refuses to be embedded by other sites, so keep small WebP copies of its images in docs/img/o/."""
+    from PIL import Image
+    def one(c):
+        m = re.match(r"https://(en|www)\.onepiece-cardgame\.com/images/cardlist/card/(.+)\.png$", c["image"] or "")
+        if not m:
+            return
+        rel = f'img/o/{"en" if m[1] == "en" else "jp"}/{m[2]}.webp'
+        path = os.path.join(ROOT, "docs", rel)
+        if not os.path.exists(path):
+            try:
+                with urllib.request.urlopen(urllib.request.Request(c["image"], headers=UA), timeout=60) as r:
+                    im = Image.open(io.BytesIO(r.read())).convert("RGB")
+            except Exception:
+                c["image"] = ""
+                return
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            im.thumbnail((320, 448))
+            im.save(path, "WEBP", quality=80)
+        c["image"] = rel
+    with ThreadPoolExecutor(8) as ex:
+        list(ex.map(one, cards))
+
+def off_variant(c):
+    m = re.search(r"_([pr])(\d+)$", c["id"])
+    label = ("Parallel" if m[1] == "p" else "Reprint") + ("" if m[2] == "1" else " " + m[2]) if m else "Standard"
+    pack = c["pack"]
+    if pack and not c["number"].startswith("P-") and c["number"].split("-")[0] not in pack.replace("-", ""):
+        label = ("Reprint" if label == "Standard" else label) + f" ({pack})"
+    return label
+
+def off_card(c, game_lang, character, cid):
+    prefix = c["number"].split("-")[0]
+    return {
+        "id": cid, "game": "onepiece", "lang": game_lang, "promo": c["promo"] or c["number"].startswith("P-"),
+        "character": character, "name": c["name"], "number": c["number"],
+        "set": "Promo" if prefix == "P" else SETNAMES.get(prefix, prefix), "rarity": c["rarity"],
+        "finish": "Non-foil" if c["rarity"] in ("C", "UC") and "_" not in c["id"] else "Foil",
+        "variant": off_variant(c), "image": c["image"], "price": None, "currency": "USD" if game_lang == "EN" else "JPY",
+    }
+
+def norm_id(i):
+    """optcgapi writes promo prints as _prN where the official list uses _pN."""
+    return re.sub(r"_pr(\d+)$", r"_p\1", re.sub(r"#\d+$", "", i.replace("promo:", "")))
+
+def add_official_en(cards, off, names, aliases):
+    """Add the cards optcgapi lacks. optcgapi's '#2' duplicates are dropped: the official list has the real card."""
+    cards = [c for c in cards if "#" not in c["id"]]
+    have = {(c["id"].startswith("promo:"), norm_id(c["id"])) for c in cards}
+    for c in off.values():
+        if c["name"] not in names and c["name"] not in aliases:
+            continue
+        if (c["promo"], norm_id(c["id"])) not in have:
+            cards.append(off_card(c, "EN", aliases.get(c["name"], c["name"]), ("promo:" if c["promo"] else "") + c["id"]))
+    return cards
+
+def onepiece_jp_official(off, jp):
+    words = {nfkc(w): ch for ch, ws in jp.items() for w in ws}
+    return [off_card(c, "JP", words[nfkc(c["name"])], "jp:" + c["id"]) for c in off.values() if nfkc(c["name"]) in words]
+
+def attach_jp_prices(cards, shop):
+    """Prices from the shops, only where one shop entry clearly matches one official card."""
+    theirs, mine = defaultdict(list), defaultdict(list)
+    for s in shop:
+        theirs[s["number"]].append(s)
+    for c in cards:
+        mine[c["number"]].append(c)
+    for num, cs in mine.items():
+        for kind in ("Standard", "Parallel"):
+            a = [c for c in cs if c["variant"].startswith(kind)]
+            b = [s for s in theirs[num] if s["variant"] == kind]
+            if len(a) == 1 and len(b) == 1 and b[0]["price"]:
+                a[0]["price"] = b[0]["price"]
 
 def onepiece_jp(jp):
     cards = {}
@@ -166,18 +271,35 @@ def pokemon(rules):
 
 def main():
     cfg = json.load(open(os.path.join(ROOT, "config.json")))
-    old = {}
-    if os.path.exists(OUT):
-        old = {c["id"]: c.get("price") for c in json.load(open(OUT))["cards"]}
-    jp = onepiece_jp(cfg.get("onepiece_jp", {}))
-    cards = (onepiece_en(set(cfg["onepiece"]), cfg.get("onepiece_aliases", {})) + jp
-             + cardrush_jp(cfg.get("onepiece_jp", {}), jp) + pokemon(cfg["pokemon"]))
+    prev = json.load(open(OUT))["cards"] if os.path.exists(OUT) else []
+    old = {c["id"]: c for c in prev}
+    off_en, off_jp = official("en.onepiece-cardgame.com"), official("www.onepiece-cardgame.com")
+    if len(off_en) < 1000 or len(off_jp) < 1000:
+        sys.exit(f"official card list unavailable ({len(off_en)} EN, {len(off_jp)} JP cards); keeping previous data")
+    names, aliases, jpn = set(cfg["onepiece"]), cfg.get("onepiece_aliases", {}), cfg.get("onepiece_jp", {})
+    groups = {("onepiece", "EN"): add_official_en(onepiece_en(names, aliases), off_en, names, aliases)}
+    jp = onepiece_jp_official(off_jp, jpn)
+    attach_jp_prices(jp, onepiece_jp(jpn))
+    groups[("onepiece", "JP")] = jp + cardrush_jp(jpn, jp)
+    for c in pokemon(cfg["pokemon"]):
+        groups.setdefault((c["game"], c["lang"]), []).append(c)
+    cards = []
+    for key, new in groups.items():
+        before = [c for c in prev if (c["game"], c["lang"]) == key]
+        if len(new) < 0.8 * len(before):
+            print(f"warning: {key} returned {len(new)} cards (was {len(before)}); keeping previous")
+            new = before
+        cards += new
+    self_host(cards)
     ov = json.load(open(os.path.join(ROOT, "image_overrides.json"))) if os.path.exists(os.path.join(ROOT, "image_overrides.json")) else {}
     for c in cards:
         if (not c["image"] or "noimage" in c["image"]) and c["id"] in ov:
             c["image"], c["imageApprox"] = ov[c["id"]], True
         c["finish"] = cfg.get("finish_overrides", {}).get(c["id"], c["finish"])
-        c["prev_price"] = old.get(c["id"])
+        was = old.get(c["id"], {})
+        if c["price"] is None and was.get("price") is not None:  # a shop was unreachable: keep the last known price
+            c["price"], c["currency"] = was["price"], was["currency"]
+        c["prev_price"] = was.get("price")
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     json.dump({"updated": date.today().isoformat(), "characters": {
         "onepiece": cfg["onepiece"], "pokemon": [r["name"] for r in cfg["pokemon"]]}, "cards": cards},

@@ -33,7 +33,6 @@ nav button{flex:1;background:none;border:0;color:var(--mute);padding:14px 0;font
 .modal{position:fixed;inset:0;background:#000a;display:grid;place-items:center;z-index:20;padding:16px}.modal form{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;width:100%;max-width:340px;display:grid;gap:10px}.modal input{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px;font:inherit}.modal .go{background:var(--acc);color:#000;border:0;border-radius:10px;padding:11px;font:inherit;font-weight:700}.modal .lnk{background:none;border:0;color:var(--mute);font:inherit}.err{color:var(--bad);font-size:13px;min-height:1em}
 .empty{text-align:center;color:var(--mute);padding:40px 16px}
 .sum{padding:0 16px 8px;color:var(--mute);font-size:13px}
-.tools{display:flex;gap:8px;padding:8px 16px}.tools button{flex:1;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit}
 </style></head><body>
 <header>
  <h1>Card Tracker <small id="upd"></small></h1>
@@ -48,7 +47,6 @@ nav button{flex:1;background:none;border:0;color:var(--mute);padding:14px 0;font
 <div class="stats" id="stats"></div><div class="bar"><i id="pb"></i></div>
 <div class="sum" id="sum"></div>
 <div class="grid" id="grid"></div>
-<div class="tools"><button id="exp">Export collection</button><button id="imp">Import</button></div>
 <nav><button data-v="all" class="on">All</button><button data-v="need">Need to buy</button><button data-v="own">Owned</button></nav>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -114,7 +112,5 @@ function render(){
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));render()});
 ['q','typ','rar','fin','sort'].forEach(i=>$(i).oninput=render);
-$('exp').onclick=()=>{const t=JSON.stringify(Object.keys(owned));navigator.clipboard?.writeText(t).then(()=>alert('Collection copied to clipboard.'),()=>prompt('Copy:',t))||prompt('Copy:',t)};
-$('imp').onclick=()=>{const t=prompt('Paste exported collection:');if(!t)return;try{JSON.parse(t).forEach(k=>owned[k]=1);save();render()}catch(e){alert('Invalid data')}};
 fetch('data/cards.json',{cache:'no-cache'}).then(r=>r.json()).then(d=>{DATA=d;$('upd').textContent='prices '+d.updated;acct();render();if(user)pull()}).catch(()=>$('grid').innerHTML='<div class="empty">Could not load data/cards.json</div>');
 </script></body></html>
