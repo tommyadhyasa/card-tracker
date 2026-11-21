@@ -3,7 +3,7 @@
 Sources: onepiece-cardgame.com official card list (One Piece EN + JP catalog), optcgapi.com (One Piece EN prices + event promos),
 yuyu-tei.jp / cardrush-op.jp (One Piece JP prices, JPY), tcgdex.net (Pokemon EN + JP).
 Run weekly (see .github/workflows/weekly.yml) or by hand: python3 update_data.py"""
-import html, io, json, os, re, sys, time, unicodedata, urllib.parse, urllib.request
+import hashlib, html, io, json, os, re, sys, time, unicodedata, urllib.parse, urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -97,14 +97,17 @@ def official(host):
 
 HOSTED = [  # (official image url, where the small copy goes under docs/)
     (r"https://(en|www)\.onepiece-cardgame\.com/images/cardlist/card/(.+)\.png$", lambda m: f'img/o/{"en" if m[1] == "en" else "jp"}/{m[2]}.webp'),
-    (r"https://www\.pokemon-card\.com/assets/images/card_images/(?:large|legend)/\w+/(\w+)\.jpg$", lambda m: f"img/p/jp/{m[1]}.webp"),
+    (r"https://www\.pokemon-card\.com/assets/images/card_images/(?:large|legend)/[\w-]+/(\w+)\.jpg$", lambda m: f"img/p/jp/{m[1]}.webp"),
     (r"https://asia\.pokemon-card\.com/id/card-img/(id\d+)\.png$", lambda m: f"img/p/id/{m[1]}.webp"),
+    (r"(https?://.+)$", lambda m: f"img/x/{hashlib.sha1(m[1].encode()).hexdigest()[:12]}.webp"),  # everything else (optcgapi, TCGdex, Yuyu-tei)
 ]
 
 def self_host(cards):
-    """The official sites refuse hotlinking or serve huge files, so keep small WebP copies of their images in docs/img/."""
+    """Keep small WebP copies of every card picture in docs/img/: the official sites refuse hotlinking, and the other hosts are slow or flaky on phones."""
     from PIL import Image
     def one(c):
+        if "noimage" in (c["image"] or ""):
+            return  # placeholder; main() swaps in an override picture if there is one
         for pat, where in HOSTED:
             m = re.match(pat, c["image"] or "")
             if m:
@@ -118,7 +121,8 @@ def self_host(cards):
                 with urllib.request.urlopen(urllib.request.Request(c["image"], headers=UA), timeout=60) as r:
                     im = Image.open(io.BytesIO(r.read())).convert("RGB")
             except Exception:
-                c["image"] = ""
+                if "onepiece-cardgame.com" in c["image"] or "pokemon-card.com" in c["image"]:
+                    c["image"] = ""  # those hosts can't be hotlinked; other hosts can, so keep the link
                 return
             os.makedirs(os.path.dirname(path), exist_ok=True)
             im.thumbnail((320, 448))
