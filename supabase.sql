@@ -8,3 +8,8 @@ alter table owned_cards enable row level security;
 create policy "own rows read"   on owned_cards for select using (auth.uid() = user_id);
 create policy "own rows insert" on owned_cards for insert with check (auth.uid() = user_id);
 create policy "own rows delete" on owned_cards for delete using (auth.uid() = user_id);
+
+-- Purchase info (price paid + currency). Run once more if you set the table up before this was added.
+alter table owned_cards add column if not exists paid_price numeric;
+alter table owned_cards add column if not exists paid_currency text check (paid_currency in ('IDR','JPY','USD'));
+create policy "own rows update" on owned_cards for update using (auth.uid() = user_id) with check (auth.uid() = user_id);

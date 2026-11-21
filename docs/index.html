@@ -34,6 +34,7 @@ nav button{flex:1;background:none;border:0;color:var(--mute);padding:14px 0;font
 #savebar{position:fixed;left:8px;right:8px;bottom:calc(58px + env(safe-area-inset-bottom));z-index:10;background:var(--panel);border:1px solid var(--acc);border-radius:12px;padding:8px 10px;display:flex;align-items:center;gap:8px;font-size:13px;box-shadow:0 4px 16px #0006}
 #savebar[hidden]{display:none}#savebar span{flex:1}#savebar button{border-radius:9px;padding:8px 14px;font:inherit;font-weight:700;border:1px solid var(--line);background:none;color:var(--text)}#savebar .go{background:var(--acc);color:#000;border:0}
 .grid{padding-bottom:130px}
+.modal .mu{color:var(--mute);font-size:13px}.modal .pay{display:flex;gap:8px}.modal .pay input{flex:1;min-width:0}.modal select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px;font:inherit}
 .empty{text-align:center;color:var(--mute);padding:40px 16px}
 .sum{padding:0 16px 8px;color:var(--mute);font-size:13px}
 </style></head><body>
@@ -58,41 +59,63 @@ nav button{flex:1;background:none;border:0;color:var(--mute);padding:14px 0;font
 const $=id=>document.getElementById(id);
 const LS='cardtracker.owned.v1';let owned={};
 try{owned=JSON.parse(localStorage.getItem(LS)||'{}')}catch(e){}
-const save=()=>{try{localStorage.setItem(LS,JSON.stringify(owned))}catch(e){}};
+const LP='cardtracker.paid.v1';let paid={}; // paid[cardId]={p:price,c:'IDR'|'JPY'|'USD'}
+try{paid=JSON.parse(localStorage.getItem(LP)||'{}')}catch(e){}
+const save=()=>{try{localStorage.setItem(LS,JSON.stringify(owned));localStorage.setItem(LP,JSON.stringify(paid))}catch(e){}};
 let sb=null,user=null;
 try{if(window.SUPABASE_URL&&window.supabase)sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY)}catch(e){}
-// Ticking only edits a draft; Save writes it to the database. `cloud` is the list as last read from / written to the database.
-const LB='cardtracker.base.v1';let cloud=null;
-const saveBase=()=>{try{cloud?localStorage.setItem(LB,JSON.stringify([...cloud])):localStorage.removeItem(LB)}catch(e){}};
-const diff=()=>{const mine=Object.keys(owned),c=cloud||new Set();return{add:mine.filter(k=>!c.has(k)),rem:[...c].filter(k=>!owned[k])}};
-const dirty=()=>{if(!(sb&&user&&cloud))return false;const d=diff();return d.add.length+d.rem.length>0};
-async function pull(){ // cloud list + this device's unsaved edits (relative to the last list this device saw)
- const ids=[];for(let from=0;;from+=1000){
-  const {data,error}=await sb.from('owned_cards').select('card_id').order('card_id').range(from,from+999);
+// Ticking and prices only edit a draft; Save writes it to the database. `cloud`/`cloudPaid` are as last read from / written to the database.
+const LB='cardtracker.base.v1';let cloud=null,cloudPaid={},paidOK=true; // paidOK: the table has the price columns
+const same=(a,b)=>JSON.stringify(a||null)===JSON.stringify(b||null);
+const saveBase=()=>{try{cloud?localStorage.setItem(LB,JSON.stringify({ids:[...cloud],paid:cloudPaid})):localStorage.removeItem(LB)}catch(e){}};
+const diff=()=>{const mine=Object.keys(owned),c=cloud||new Set();
+ return{add:mine.filter(k=>!c.has(k)),rem:[...c].filter(k=>!owned[k]),chg:paidOK?mine.filter(k=>c.has(k)&&!same(paid[k],cloudPaid[k])):[]}};
+const dirty=()=>{if(!(sb&&user&&cloud))return false;const d=diff();return d.add.length+d.rem.length+d.chg.length>0};
+async function pull(){ // cloud list + this device's unsaved edits (relative to the list this device last saw)
+ const rows=[];paidOK=true;let cols='card_id,paid_price,paid_currency';
+ for(let from=0;;from+=1000){
+  let {data,error}=await sb.from('owned_cards').select(cols).order('card_id').range(from,from+999);
+  if(error&&cols!=='card_id'&&/paid_/.test(error.message)){paidOK=false;cols='card_id';from=-1000;rows.length=0;continue}
   if(error)return alert('Could not load your collection: '+error.message);
-  ids.push(...data.map(r=>r.card_id));if(data.length<1000)break}
- let base=null;try{base=new Set(JSON.parse(localStorage.getItem(LB)||'null'))}catch(e){}
- const mine=new Set(Object.keys(owned)),merged=new Set(ids);
+  rows.push(...data);if(data.length<1000)break}
+ let base=null,basePaid={};try{const b=JSON.parse(localStorage.getItem(LB)||'null');if(b){base=new Set(Array.isArray(b)?b:b.ids);basePaid=Array.isArray(b)?{}:b.paid||{}}}catch(e){}
+ const mine=new Set(Object.keys(owned)),merged=new Set(rows.map(r=>r.card_id));
  mine.forEach(k=>{if(!base||!base.has(k))merged.add(k)});
  if(base)base.forEach(k=>{if(!mine.has(k))merged.delete(k)});
- cloud=new Set(ids);saveBase();owned=Object.fromEntries([...merged].map(k=>[k,1]));save();render()}
+ cloudPaid={};rows.forEach(r=>{if(r.paid_price!=null)cloudPaid[r.card_id]={p:+r.paid_price,c:r.paid_currency}});
+ const np={};merged.forEach(k=>{const v=same(paid[k],basePaid[k])?cloudPaid[k]:paid[k];if(v)np[k]=v}); // my own price edits win, otherwise the database's
+ cloud=new Set(rows.map(r=>r.card_id));saveBase();owned=Object.fromEntries([...merged].map(k=>[k,1]));paid=paidOK?np:paid;save();render()}
 function dialog(html,onOk){const m=document.createElement('div');m.className='modal';
  m.innerHTML='<form>'+html+'<button class="go" id="ok">Confirm</button><button type="button" class="lnk" id="cx">Cancel</button></form>';document.body.append(m);
  m.querySelector('#cx').onclick=()=>m.remove();m.querySelector('form').onsubmit=async e=>{e.preventDefault();m.querySelector('#ok').disabled=true;await onOk(m)};return m}
 function updateBar(){const d=dirty()?diff():null,bar=$('savebar');bar.hidden=!d;
- if(d)$('sbtxt').textContent=`Unsaved: ${d.add.length?'+'+d.add.length+' owned':''}${d.add.length&&d.rem.length?', ':''}${d.rem.length?'−'+d.rem.length+' removed':''}`;acct()}
-$('sbs').onclick=()=>{const d=diff();dialog(`<b>Save to your account?</b><div>${d.add.length} card(s) marked as owned, ${d.rem.length} card(s) removed.<br>This replaces what is stored in the database.</div>`,async m=>{
- const rows=d.add.map(card_id=>({card_id}));
- for(let i=0;i<rows.length;i+=500){const {error}=await sb.from('owned_cards').upsert(rows.slice(i,i+500),{ignoreDuplicates:true});if(error){m.remove();return alert('Save failed: '+error.message+'\nNothing was lost on this device; try again.')}}
- for(let i=0;i<d.rem.length;i+=500){const {error}=await sb.from('owned_cards').delete().in('card_id',d.rem.slice(i,i+500));if(error){m.remove();return alert('Save failed: '+error.message+'\nNothing was lost on this device; try again.')}}
- cloud=new Set(Object.keys(owned));saveBase();updateBar();
+ if(d)$('sbtxt').textContent='Unsaved: '+[d.add.length&&'+'+d.add.length+' owned',d.rem.length&&'−'+d.rem.length+' removed',d.chg.length&&d.chg.length+' price edit(s)'].filter(Boolean).join(', ');acct()}
+$('sbs').onclick=()=>{const d=diff();dialog(`<b>Save to your account?</b><div>${d.add.length} card(s) marked as owned, ${d.rem.length} card(s) removed${paidOK?`, ${d.chg.length} price edit(s)`:''}.<br>This replaces what is stored in the database.</div>`,async m=>{
+ const fail=error=>{m.remove();alert('Save failed: '+error.message+'\nNothing was lost on this device; try again.')};
+ const up=paidOK?[...d.add,...d.chg].map(k=>({user_id:user.id,card_id:k,paid_price:paid[k]?paid[k].p:null,paid_currency:paid[k]?paid[k].c:null})):d.add.map(card_id=>({card_id}));
+ for(let i=0;i<up.length;i+=500){const {error}=await sb.from('owned_cards').upsert(up.slice(i,i+500),paidOK?{onConflict:'user_id,card_id'}:{ignoreDuplicates:true});if(error)return fail(error)}
+ for(let i=0;i<d.rem.length;i+=500){const {error}=await sb.from('owned_cards').delete().in('card_id',d.rem.slice(i,i+500));if(error)return fail(error)}
+ cloud=new Set(Object.keys(owned));cloudPaid=paidOK?JSON.parse(JSON.stringify(paid)):{};saveBase();updateBar();
  m.querySelector('form').innerHTML='<b>Saved ✓</b><div>Your collection is stored in the database.</div>';setTimeout(()=>m.remove(),1200)})};
-$('sbx').onclick=()=>dialog('<b>Discard unsaved changes?</b><div>Your collection goes back to the last saved version.</div>',async m=>{owned=Object.fromEntries([...cloud].map(k=>[k,1]));save();m.remove();render()});
+$('sbx').onclick=()=>dialog('<b>Discard unsaved changes?</b><div>Your collection and prices go back to the last saved version.</div>',async m=>{owned=Object.fromEntries([...cloud].map(k=>[k,1]));paid=JSON.parse(JSON.stringify(cloudPaid));save();m.remove();render()});
+const CUR={IDR:'Rp',JPY:'¥',USD:'$'},fmtPaid=v=>v?`${CUR[v.c]||''}${v.c==='USD'?v.p.toFixed(2):Math.round(v.p).toLocaleString(v.c==='IDR'?'id-ID':'en-US')}`:'';
+function cardModal(c){ // owned card: record what it cost, or remove it
+ const v=paid[c.id],def={EN:'USD',JP:'JPY',ID:'IDR'}[c.lang]||'USD',m=document.createElement('div');m.className='modal';
+ m.innerHTML=`<form><b>${c.character} · ${c.name}</b><div class="mu">${c.number} · ${c.set} · ${c.lang}${c.variant!=='Standard'?' · '+c.variant:''}</div>
+  <label class="mu">What did you pay?</label><div class="pay"><input type="number" id="pp" inputmode="decimal" min="0" step="any" placeholder="Price" value="${v?v.p:''}"><select id="pc">${['IDR','JPY','USD'].map(x=>`<option${x===(v?v.c:def)?' selected':''}>${x}</option>`).join('')}</select></div>
+  <div class="mu">${paidOK||!sb||!user?'':'The database has no price columns yet, so prices are kept on this device only (run the updated supabase.sql).'}</div>
+  <button class="go">Save price</button><button type="button" class="lnk" id="cl">Clear price</button><button type="button" class="lnk" id="rm">Remove from my collection</button><button type="button" class="lnk" id="cx">Close</button></form>`;
+ document.body.append(m);const done=()=>{m.remove();save();render()};
+ m.querySelector('#cx').onclick=()=>m.remove();
+ m.querySelector('#cl').onclick=()=>{delete paid[c.id];done()};
+ m.querySelector('#rm').onclick=()=>{delete owned[c.id];delete paid[c.id];done()};
+ m.querySelector('form').onsubmit=e=>{e.preventDefault();const p=parseFloat(m.querySelector('#pp').value);
+  if(isNaN(p)||p<0)delete paid[c.id];else paid[c.id]={p,c:m.querySelector('#pc').value};done()}}
 window.addEventListener('beforeunload',e=>{if(dirty()){e.preventDefault();e.returnValue=''}});
 function acct(){const a=$('acct');
  if(!sb){a.innerHTML='<span>Saved on this device only</span>';return}
  a.innerHTML=user?`<span>${user.email} · ${dirty()?'unsaved changes':'saved'}</span><button id="so">Log out</button>`:'<span>Log in to save across devices</span><button id="li">Log in</button>';
- if($('so'))$('so').onclick=()=>{const out=async m=>{await sb.auth.signOut();owned={};cloud=null;save();saveBase();m&&m.remove();render()};dirty()?dialog('<b>Log out with unsaved changes?</b><div>Unsaved changes on this device will be lost.</div>',out):out()};
+ if($('so'))$('so').onclick=()=>{const out=async m=>{await sb.auth.signOut();owned={};paid={};cloud=null;cloudPaid={};save();saveBase();m&&m.remove();render()};dirty()?dialog('<b>Log out with unsaved changes?</b><div>Unsaved changes on this device will be lost.</div>',out):out()};
  if($('li'))$('li').onclick=loginForm}
 function loginForm(){const m=document.createElement('div');m.className='modal';
  m.innerHTML='<form><b>Log in / Sign up</b><input type="email" id="em" placeholder="Email" autocomplete="email" required><input type="password" id="pw" placeholder="Password (6+ chars)" autocomplete="current-password" required minlength="6"><div class="err" id="er"></div><button class="go" id="in">Log in</button><button type="button" class="lnk" id="su">Create account</button><button type="button" class="lnk" id="cx">Cancel</button></form>';
@@ -133,8 +156,8 @@ function render(){
  $('grid').innerHTML=list.length?'':'<div class="empty">No cards match.</div>';
  for(const c of list){
   const d=chg(c),el=document.createElement('div');el.className='card'+(owned[c.id]?' own':'');
-  el.innerHTML=`<img loading="lazy" referrerpolicy="no-referrer" src="${c.image}" alt=""><div class="tick">${owned[c.id]?'✓':'+'}</div><div class="info"><div class="n">${c.character}${c.variant!=='Standard'?' · '+c.variant:''}</div><div class="m">${c.number} · ${c.set}</div><div class="m"><span class="tag">${c.lang}</span>${c.promo?'<span class="tag">Promo</span>':''}${c.imageApprox?'<span class="tag" title="Picture found via Google; may not be the exact version">~img</span>':''}<span class="tag">${c.rarity}</span><span class="tag">${c.finish}</span></div><div class="price">${money(c.price,c.currency)} ${d?`<small class="${d>0?'up':'dn'}">${d>0?'▲':'▼'}${Math.abs(d).toFixed(2)}</small>`:''}</div></div>`;
-  el.onclick=()=>{const on=!owned[c.id];on?owned[c.id]=1:delete owned[c.id];save();render()};
+  el.innerHTML=`<img loading="lazy" referrerpolicy="no-referrer" src="${c.image}" alt=""><div class="tick">${owned[c.id]?'✓':'+'}</div><div class="info"><div class="n">${c.character}${c.variant!=='Standard'?' · '+c.variant:''}</div><div class="m">${c.number} · ${c.set}</div><div class="m"><span class="tag">${c.lang}</span>${c.promo?'<span class="tag">Promo</span>':''}${c.imageApprox?'<span class="tag" title="Picture found via Google; may not be the exact version">~img</span>':''}<span class="tag">${c.rarity}</span><span class="tag">${c.finish}</span></div><div class="price">${money(c.price,c.currency)} ${d?`<small class="${d>0?'up':'dn'}">${d>0?'▲':'▼'}${Math.abs(d).toFixed(2)}</small>`:''}</div>${owned[c.id]&&paid[c.id]?`<div class="m">Paid ${fmtPaid(paid[c.id])}</div>`:''}</div>`;
+  el.onclick=()=>{if(owned[c.id])return cardModal(c);owned[c.id]=1;save();render()};
   $('grid').append(el)}
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));render()});
