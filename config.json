@@ -53,6 +53,12 @@
       "ja": "ケロマツ",
       "match": "contains",
       "category": "Pokemon"
+    },
+    {
+      "name": "Frogadier",
+      "ja": "ゲコガシラ",
+      "match": "contains",
+      "category": "Pokemon"
     }
   ],
   "finish_overrides": {
