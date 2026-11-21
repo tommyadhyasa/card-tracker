@@ -51,5 +51,22 @@
   ],
   "finish_overrides": {
     "promo:P-115_pr1": "Non-foil"
+  },
+  "don_aliases": {
+    "Nico Robin": [
+      "Robin",
+      "ロビン"
+    ],
+    "Boa Hancock": [
+      "Hancock",
+      "ハンコック"
+    ],
+    "Vinsmoke Reiju": [
+      "Reiju",
+      "レイジュ"
+    ],
+    "Ulti": [
+      "ウルティ"
+    ]
   }
 }

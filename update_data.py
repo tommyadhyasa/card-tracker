@@ -278,6 +278,61 @@ def pokemon(rules):
                     }
     return list(cards.values())
 
+def don_names(cfg):
+    """DON!! card names use short names ("Robin"), so map every spelling to the tracked character."""
+    m = {n: n for n in cfg["onepiece"]}
+    m.update({nfkc(w): ch for ch, ws in cfg.get("onepiece_jp", {}).items() for w in ws})
+    for ch, ws in cfg.get("don_aliases", {}).items():
+        m.update({nfkc(w): ch for w in ws})
+    return m
+
+def don_character(label, names):
+    """The tracked character on a DON!! card, from the first parenthesis: "(Nami & Robin)" -> Nami."""
+    m = re.search(r"[(（]([^)）]*)[)）]", label)
+    for tok in re.split(r"[&＆]", nfkc(m[1]) if m else ""):
+        if tok.strip() in names:
+            return names[tok.strip()]
+
+def don_en(names):
+    cards = []
+    for c in get("https://optcgapi.com/api/allDonCards/") or []:
+        ch = don_character(c["card_name"], names)
+        if not ch:
+            continue
+        variant = " ".join(re.findall(r"\(([^)]*)\)", c["card_name"])[1:]) or "Standard"
+        cards.append({
+            "id": "don:" + c["card_image_id"], "game": "onepiece", "lang": "EN", "promo": c["set_id"] == "P", "character": ch,
+            "name": c["card_name"].strip(), "number": "DON!!", "set": c["set_name"], "rarity": "DON!!",
+            "finish": "Foil" if re.search("Gold|Parallel|Foil", variant) else "Non-foil", "variant": variant,
+            "image": c["card_image"], "price": c["market_price"], "currency": "USD"})
+    return cards
+
+def don_jp(names):
+    """Japanese DON!! cards from Yuyu-tei (unreachable from GitHub; main() then keeps the previous ones)."""
+    cards = {}
+    for w in {k for k in names if not k.isascii()}:
+        h = fetch("https://yuyu-tei.jp/sell/opc/s/search?search_word=" + urllib.parse.quote("ドン!!カード(" + w)) or ""
+        for b in h.split('class="card-product')[1:]:
+            m = re.search(r'/sell/opc/card/([^"]+)"', b)
+            n = re.search(r'<h4[^>]*>([^<]*)</h4>', b)
+            if not (m and n):
+                continue
+            name = html.unescape(n[1]).strip()
+            ch = don_character(name, names) if name.startswith("ドン!!カード") else None
+            if not ch:
+                continue
+            p = re.search(r'([\d,]+)\s*円', b)
+            img = re.search(r'src="(https://card\.yuyu-tei\.jp[^"]+)"', b)
+            variant = en_variant(name)
+            prefix = m[1].split("/")[0].upper()
+            cards["jp:don:" + m[1]] = {
+                "id": "jp:don:" + m[1], "game": "onepiece", "lang": "JP", "promo": False, "character": ch, "name": name,
+                "number": "DON!!", "set": SETNAMES.get(prefix, prefix), "rarity": "DON!!",
+                "finish": "Foil" if "Parallel" in variant else "Non-foil", "variant": variant,
+                "image": img[1].replace("100_140", "200_280") if img else "",
+                "price": int(p[1].replace(",", "")) if p else None, "currency": "JPY"}
+    return list(cards.values())
+
 def pokemon_official(rules):
     """Pokemon cards from the official Japanese and Indonesian (Asia) card databases: (JP list, ID list)."""
     def name_ok(rule, name, term):
@@ -350,10 +405,12 @@ def main():
     if len(off_en) < 1000 or len(off_jp) < 1000:
         sys.exit(f"official card list unavailable ({len(off_en)} EN, {len(off_jp)} JP cards); keeping previous data")
     names, aliases, jpn = set(cfg["onepiece"]), cfg.get("onepiece_aliases", {}), cfg.get("onepiece_jp", {})
-    groups = {("onepiece", "EN"): add_official_en(onepiece_en(names, aliases), off_en, names, aliases)}
+    dons = don_names(cfg)
+    groups = {("onepiece", "EN"): add_official_en(onepiece_en(names, aliases), off_en, names, aliases) + don_en(dons)}
     jp = onepiece_jp_official(off_jp, jpn)
     attach_jp_prices(jp, onepiece_jp(jpn))
-    groups[("onepiece", "JP")] = jp + cardrush_jp(jpn, jp)
+    don = don_jp(dons) or [c for c in prev if c["id"].startswith("jp:don:")]
+    groups[("onepiece", "JP")] = jp + cardrush_jp(jpn, jp) + don
     off_pjp, off_pid = pokemon_official(cfg["pokemon"])
     pk = pokemon(cfg["pokemon"])
     pk = add_official_pokemon(pk, off_pjp) + off_pid
