@@ -47,6 +47,12 @@
       "ja": "シロナ",
       "match": "startswith",
       "category": "any"
+    },
+    {
+      "name": "Froakie",
+      "ja": "ケロマツ",
+      "match": "contains",
+      "category": "Pokemon"
     }
   ],
   "finish_overrides": {
