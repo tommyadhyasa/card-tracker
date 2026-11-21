@@ -17,3 +17,6 @@ alter table owned_cards add column if not exists paid_price numeric;
 alter table owned_cards add column if not exists paid_currency text check (paid_currency in ('IDR','JPY','USD'));
 drop policy if exists "own rows update" on owned_cards;
 create policy "own rows update" on owned_cards for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- PSA grade (1-10) for graded cards.
+alter table owned_cards add column if not exists psa_grade numeric check (psa_grade >= 1 and psa_grade <= 10);
