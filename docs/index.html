@@ -14,8 +14,8 @@ h1{font-size:18px;margin:0 0 8px;display:flex;justify-content:space-between;alig
 .chip,select,input[type=search]{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:7px 13px;font:inherit;white-space:nowrap}
 .chip.on{background:var(--acc);color:#000;border-color:var(--acc)}
 input[type=search]{width:100%;border-radius:10px;margin-bottom:8px}select{border-radius:10px}
-.stats{padding:12px 16px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}.stat b{display:block;font-size:17px}.stat span{color:var(--mute);font-size:12px}
+.stats{padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px}.stat b{display:block;font-size:17px}.stat span{color:var(--mute);font-size:12px}.stat small{display:block;color:var(--mute);font-size:11px;margin-top:2px;overflow-wrap:anywhere}
 .bar{height:6px;background:var(--line);border-radius:3px;margin:0 16px 8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ok)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:0 16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;position:relative;cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -101,6 +101,10 @@ $('sbs').onclick=()=>{const d=diff();dialog(`<b>Save to your account?</b><div>${
  m.querySelector('form').innerHTML='<b>Saved ✓</b><div>Your collection is stored in the database.</div>';setTimeout(()=>m.remove(),1200)})};
 $('sbx').onclick=()=>dialog('<b>Discard unsaved changes?</b><div>Your collection and prices go back to the last saved version.</div>',async m=>{owned=Object.fromEntries([...cloud].map(k=>[k,1]));paid=JSON.parse(JSON.stringify(cloudPaid));save();m.remove();render()});
 const CUR={IDR:'Rp',JPY:'¥',USD:'$'},fmtPaid=v=>v?`${CUR[v.c]||''}${v.c==='USD'?v.p.toFixed(2):Math.round(v.p).toLocaleString(v.c==='IDR'?'id-ID':'en-US')}`:'';
+function spentStat(own){ // what you paid for the owned cards shown, converted to ~USD, with the exact amounts per currency
+ const by={},rows=own.filter(c=>paid[c.id]&&paid[c.id].p!=null);rows.forEach(c=>by[paid[c.id].c]=(by[paid[c.id].c]||0)+paid[c.id].p);
+ const total=Object.entries(by).reduce((t,[cur,v])=>t+v*(RATE[cur]||1),0),parts=['IDR','JPY','USD'].filter(k=>by[k]).map(k=>fmtPaid({p:by[k],c:k}));
+ return `<div class="stat"><b>~$${total.toFixed(0)}</b><span>Total spent</span><small>${parts.length?parts.join(' + ')+' · '+rows.length+' card(s)':'No prices entered yet'}</small></div>`}
 function cardModal(c){ // owned card: record what it cost / its PSA grade, or remove it
  const v=paid[c.id]||{},def={EN:'USD',JP:'JPY',ID:'IDR'}[c.lang]||'USD',m=document.createElement('div');m.className='modal';
  const note=!sb||!user?'':!paidOK?'The database has no price/PSA columns yet, so this is kept on this device only (run the updated supabase.sql).':!psaOK?'The database has no PSA column yet, so the PSA grade is kept on this device only (run the updated supabase.sql).':'';
@@ -153,7 +157,7 @@ function render(){
  base=base.filter(c=>(!$('typ').value||($('typ').value==='promo')===c.promo)&&(!$('rar').value||c.rarity===$('rar').value)&&(!$('fin').value||c.finish===$('fin').value)&&(!q||(c.name+c.set+c.number+c.rarity).toLowerCase().includes(q)));
  const own=base.filter(c=>owned[c.id]),need=base.filter(c=>!owned[c.id]);
  const sum=a=>a.reduce((t,c)=>t+usd(c),0);
- $('stats').innerHTML=`<div class="stat"><b>${own.length}/${base.length}</b><span>Owned</span></div><div class="stat"><b>~$${sum(own).toFixed(0)}</b><span>Collection value</span></div><div class="stat"><b>~$${sum(need).toFixed(0)}</b><span>To complete</span></div>`;
+ $('stats').innerHTML=`<div class="stat"><b>${own.length}/${base.length}</b><span>Owned</span></div><div class="stat"><b>~$${sum(own).toFixed(0)}</b><span>Collection value</span></div><div class="stat"><b>~$${sum(need).toFixed(0)}</b><span>To complete</span></div>${spentStat(own)}`;
  $('pb').style.width=(base.length?own.length/base.length*100:0)+'%';
  let list=S.view==='own'?own:S.view==='need'?need:base;
  const so=$('sort').value,chg=c=>c.prev_price&&c.price?c.price-c.prev_price:0;
